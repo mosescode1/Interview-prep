@@ -1,0 +1,140 @@
+[
+  {
+    "title": "Checkout Latency Spike",
+    "description": "Users report that checkout is extremely slow. The support team confirms the issue started 2 hours ago. No recent deployments were made.",
+    "type": "debug",
+    "track": "production",
+    "difficulty": "medium",
+    "level": 3,
+    "stages": [
+      {
+        "name": "observe",
+        "prompt": "Users report that checkout is extremely slow. The issue started approximately 2 hours ago with no recent deployments. What would you check first?",
+        "hints": ["Start with the symptoms — what metrics would tell you the scope?", "Check if it's all users or a subset.", "Look at your monitoring dashboards."],
+        "evidence": null,
+        "expected_considerations": ["Check error rates", "Check latency metrics", "Determine scope (all users or subset)", "Check recent changes"]
+      },
+      {
+        "name": "locate",
+        "prompt": "Your investigation reveals:\n- Frontend load times are normal\n- Checkout API p95 latency increased from 300ms to 8 seconds\n- Error rate is still low (0.2%)\n- All other API endpoints are performing normally\n\nThe problem is isolated to the checkout API. Where would you investigate next?",
+        "hints": ["The API is slow but not erroring — what's it waiting on?", "Think about the checkout API's dependencies.", "Check downstream service latencies."],
+        "evidence": {"api_latency_p95": "8000ms", "error_rate": "0.2%", "affected_endpoint": "/api/checkout", "other_endpoints": "normal"},
+        "expected_considerations": ["Check database query times", "Check external service calls", "Look at distributed traces", "Check resource utilization"]
+      },
+      {
+        "name": "identify",
+        "prompt": "Distributed tracing shows:\n- 7 of the 8 seconds are spent waiting for the database\n- The slow query is: SELECT * FROM orders WHERE user_id = ? AND status = 'pending' ORDER BY created_at DESC\n- This query was added in a migration 3 hours ago\n- The orders table has 15 million rows\n\nWhat would you investigate in PostgreSQL?",
+        "hints": ["Check if there's an index on the columns used in the WHERE clause.", "Use EXPLAIN ANALYZE on the slow query.", "The migration was 3 hours ago — was an index included?"],
+        "evidence": {"slow_query": "SELECT * FROM orders WHERE user_id = ? AND status = 'pending' ORDER BY created_at DESC", "db_wait_time": "7000ms", "table_size": "15M rows", "migration_time": "3 hours ago"},
+        "expected_considerations": ["Check for missing index", "Run EXPLAIN ANALYZE", "Check if migration added the query without an index", "Check table statistics"]
+      },
+      {
+        "name": "fix",
+        "prompt": "EXPLAIN ANALYZE confirms a sequential scan on the orders table (15M rows). There is no index on (user_id, status, created_at).\n\nThe migration added a new query path but did not include the corresponding index.\n\nWhat would you do to fix this? Consider both immediate and long-term actions.",
+        "hints": ["CREATE INDEX CONCURRENTLY to avoid locking the table.", "Consider a composite index that covers the full query.", "What process change would prevent this in the future?"],
+        "evidence": {"explain_output": "Seq Scan on orders, rows=15000000, actual time=6800ms", "missing_index": "(user_id, status, created_at)"},
+        "expected_considerations": ["CREATE INDEX CONCURRENTLY", "Composite index design", "Migration review process", "Query review in CI"]
+      },
+      {
+        "name": "verify",
+        "prompt": "You've created the index. How would you verify the fix worked? How would you prevent this from happening again?",
+        "hints": ["Check the same metrics you observed in step 1.", "Think about automated safeguards.", "What about a post-incident review?"],
+        "evidence": null,
+        "expected_considerations": ["Verify p95 latency returned to normal", "Check EXPLAIN ANALYZE shows index scan", "Add migration review checklist", "Add slow query alerting", "Write postmortem"]
+      }
+    ],
+    "tags": ["database", "performance", "indexing", "latency"]
+  },
+  {
+    "title": "HTTP 500 Errors After Deployment",
+    "description": "Your team deployed a new version of the user service 30 minutes ago. The error rate jumped from 0.1% to 12%. The deployment passed all CI tests.",
+    "type": "debug",
+    "track": "production",
+    "difficulty": "medium",
+    "level": 2,
+    "stages": [
+      {
+        "name": "observe",
+        "prompt": "Error rate jumped from 0.1% to 12% after a deployment 30 minutes ago. All CI tests passed. What would you check first?",
+        "hints": ["What type of errors are they — 500s, timeouts, specific error messages?", "Is it all endpoints or specific ones?", "Check the deployment diff."],
+        "evidence": null,
+        "expected_considerations": ["Check error logs", "Identify affected endpoints", "Review deployment changes", "Check if rollback is needed"]
+      },
+      {
+        "name": "locate",
+        "prompt": "Investigation shows:\n- All errors are HTTP 500 on the /api/users/profile endpoint\n- Error message: 'null pointer dereference'\n- The deployment changed the user profile serialization to include a new 'preferences' field\n- Errors only occur for users who registered before today\n\nWhere is the bug?",
+        "hints": ["Old users don't have the new field.", "What happens when you serialize a null/nil field?", "Check how the code handles missing data."],
+        "evidence": {"error_type": "500", "endpoint": "/api/users/profile", "error_message": "null pointer dereference", "pattern": "only pre-existing users"},
+        "expected_considerations": ["New field is nil for old users", "Missing nil check", "Data migration needed", "Backward compatibility"]
+      },
+      {
+        "name": "identify",
+        "prompt": "The new code accesses `user.Preferences.Theme` without checking if `Preferences` is nil. Old users have NULL in the preferences column.\n\n```go\nfunc GetProfile(user *User) ProfileResponse {\n    return ProfileResponse{\n        Name:  user.Name,\n        Theme: user.Preferences.Theme, // crashes when Preferences is nil\n    }\n}\n```\n\nWhat is the root cause and what needs to change?",
+        "hints": ["The immediate fix is a nil check.", "But why did CI tests not catch this?", "Think about the broader pattern."],
+        "evidence": {"root_cause": "nil pointer dereference on Preferences field for old users", "code_location": "GetProfile handler"},
+        "expected_considerations": ["Add nil check", "Add default preferences for old users", "Add test with nil preferences", "Consider data backfill migration"]
+      },
+      {
+        "name": "fix",
+        "prompt": "What would your fix look like? Should you rollback first, fix forward, or both? What about the existing users with NULL preferences?",
+        "hints": ["Rollback stops the bleeding immediately.", "Fix forward with a nil check is fast.", "Consider a data migration for old users."],
+        "evidence": null,
+        "expected_considerations": ["Rollback immediately to stop errors", "Fix: add nil check with default", "Backfill migration for old users", "Add regression test"]
+      },
+      {
+        "name": "verify",
+        "prompt": "How do you verify the fix and prevent similar issues?",
+        "hints": ["Monitor error rate after redeployment.", "What test would have caught this?", "What code review checklist item would help?"],
+        "evidence": null,
+        "expected_considerations": ["Verify error rate drops to baseline", "Add test for nil/missing fields", "Code review: check nil safety for new fields", "Add integration test with old data"]
+      }
+    ],
+    "tags": ["deployment", "null-pointer", "backward-compatibility", "rollback"]
+  },
+  {
+    "title": "Memory Leak in Production",
+    "description": "Your application's memory usage has been steadily increasing over the past week. Pods are getting OOMKilled every 18-24 hours. Restarting temporarily fixes it.",
+    "type": "debug",
+    "track": "production",
+    "difficulty": "hard",
+    "level": 4,
+    "stages": [
+      {
+        "name": "observe",
+        "prompt": "Your application pods are getting OOMKilled every 18-24 hours. Memory usage graphs show a steady upward trend with no drops except after restarts. This started about a week ago. What would you investigate?",
+        "hints": ["What changed a week ago?", "Is the leak in all pods or specific ones?", "What tools can you use to profile memory?"],
+        "evidence": null,
+        "expected_considerations": ["Check deployment history from last week", "Memory profiling", "Heap dump analysis", "Check if all instances are affected equally"]
+      },
+      {
+        "name": "locate",
+        "prompt": "Profiling reveals:\n- Heap usage grows by ~50MB/hour\n- A deployment 8 days ago added a new caching layer using an in-memory map\n- The cache stores user session data\n- There is no eviction policy or TTL\n- Active users: ~10,000/day, but the cache map has 180,000 entries\n\nWhat's the problem?",
+        "hints": ["The cache is growing but never shrinking.", "180K entries for 10K daily users — entries aren't being removed.", "What happens to sessions that expire?"],
+        "evidence": {"heap_growth": "50MB/hour", "cache_entries": 180000, "daily_active_users": 10000, "cache_type": "in-memory map", "eviction_policy": "none"},
+        "expected_considerations": ["Cache has no eviction", "Entries accumulate indefinitely", "No TTL on cached items", "Map only grows, never shrinks"]
+      },
+      {
+        "name": "identify",
+        "prompt": "The root cause is an unbounded in-memory cache with no eviction. The code:\n\n```go\nvar sessionCache = map[string]*SessionData{}\n\nfunc GetSession(id string) *SessionData {\n    if data, ok := sessionCache[id]; ok {\n        return data\n    }\n    data := loadFromDB(id)\n    sessionCache[id] = data\n    return data\n}\n```\n\nEntries are added but never removed. What would you change?",
+        "hints": ["Add TTL-based expiration.", "Consider using an LRU cache with a max size.", "Or use an external cache like Redis."],
+        "evidence": {"root_cause": "Unbounded in-memory cache with no eviction or TTL"},
+        "expected_considerations": ["Add TTL/expiration", "Use LRU cache with max size", "Consider Redis for shared cache", "Add cache size metrics"]
+      },
+      {
+        "name": "fix",
+        "prompt": "Design the fix. Consider: What cache strategy would you use? How would you size it? What metrics would you add?",
+        "hints": ["LRU with max entries OR TTL-based expiration.", "Size based on working set: ~10K active users.", "Add cache hit rate and size metrics."],
+        "evidence": null,
+        "expected_considerations": ["LRU cache with max size", "TTL of ~1 hour based on session duration", "Cache size metric for monitoring", "Cache hit/miss rate metric"]
+      },
+      {
+        "name": "verify",
+        "prompt": "After deploying the fix, how do you verify the memory leak is resolved?",
+        "hints": ["Watch the memory graph over 24+ hours.", "Check that cache size stays bounded.", "Verify no OOMKills."],
+        "evidence": null,
+        "expected_considerations": ["Monitor memory over 24-48 hours", "Verify cache size stays bounded", "No more OOMKills", "Cache metrics show expected hit rates", "Write postmortem"]
+      }
+    ],
+    "tags": ["memory-leak", "caching", "oom", "profiling"]
+  }
+]

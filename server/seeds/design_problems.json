@@ -1,0 +1,161 @@
+[
+  {
+    "title": "Design a URL Shortener",
+    "description": "Design a URL shortening service like bit.ly. It should accept long URLs and return short URLs, redirect short URLs to original URLs, handle high read traffic, and track click analytics.",
+    "type": "design",
+    "track": "architecture",
+    "difficulty": "medium",
+    "level": 3,
+    "stages": [
+      {
+        "name": "requirements",
+        "prompt": "You're designing a URL shortening service. Before jumping into the design, what requirements would you clarify? Think about both functional and non-functional requirements.",
+        "hints": ["How many URLs per day?", "How long should short URLs live?", "What about custom short URLs?"],
+        "challenges": ["What is the read-to-write ratio?", "Do URLs expire?", "What analytics do we need — just click counts or full analytics (location, device, referrer)?"],
+        "expected_considerations": ["Functional: shorten, redirect, analytics", "Non-functional: latency, availability, scale", "Read-heavy workload", "URL expiration policy"]
+      },
+      {
+        "name": "scale_estimation",
+        "prompt": "Let's estimate the scale. Assume 100 million new URLs per month. How many reads would that be? How much storage do you need?",
+        "hints": ["Read-to-write ratio is typically 100:1 for URL shorteners.", "Each URL record is small — estimate the size.", "Think about 5-year storage."],
+        "challenges": ["Show me the math for reads per second.", "How much bandwidth does that require?", "What about cache storage requirements?"],
+        "expected_considerations": ["~100M writes/month, ~10B reads/month", "~3.8K writes/sec, ~380K reads/sec at peak", "~500 bytes per record × 100M × 12 × 5 = ~3TB over 5 years"]
+      },
+      {
+        "name": "high_level_architecture",
+        "prompt": "Draw the high-level architecture. What are the main components and how do they interact?",
+        "hints": ["Think about the write path and read path separately.", "Where does caching fit?", "Do you need a load balancer?"],
+        "challenges": ["Why did you choose this particular arrangement?", "What's the single point of failure?", "How would you handle a data center outage?"],
+        "expected_considerations": ["Load balancer → API servers → Database", "Cache layer for hot URLs", "Analytics pipeline (async)", "CDN for redirects"]
+      },
+      {
+        "name": "database",
+        "prompt": "What database would you use? Design the schema. How would you handle the short code generation?",
+        "hints": ["Consider base62 encoding of an auto-increment ID.", "Or hash the URL and handle collisions.", "Think about the access pattern."],
+        "challenges": ["Why this database over alternatives?", "How do you handle hash collisions?", "How would you shard the database?"],
+        "expected_considerations": ["Schema: short_code, long_url, user_id, created_at, expires_at, click_count", "Base62 encoding or hash-based approach", "Sharding strategy", "Index on short_code for fast lookups"]
+      },
+      {
+        "name": "cache",
+        "prompt": "The system is read-heavy (100:1 ratio). How would you design the caching layer?",
+        "hints": ["What percentage of URLs are accessed frequently?", "What cache eviction policy?", "What about cache consistency?"],
+        "challenges": ["What happens when a cached URL expires?", "How do you handle cache stampede?", "What's your cache hit ratio target?"],
+        "expected_considerations": ["Redis/Memcached for hot URLs", "LRU eviction", "Cache-aside pattern", "80/20 rule — 20% of URLs get 80% of traffic"]
+      },
+      {
+        "name": "reliability",
+        "prompt": "How do you ensure the system is reliable? What happens if a component fails?",
+        "hints": ["What if the database goes down?", "What if the cache goes down?", "How do you handle network partitions?"],
+        "challenges": ["What's your availability target?", "How do you handle split-brain scenarios?", "What's your disaster recovery plan?"],
+        "expected_considerations": ["Database replication", "Cache fallback to database", "Health checks and circuit breakers", "Multi-region deployment"]
+      },
+      {
+        "name": "tradeoffs",
+        "prompt": "What are the key tradeoffs in your design? What would you change if the requirements changed?",
+        "hints": ["Consistency vs availability.", "Simple vs complex short code generation.", "Storage cost vs analytics granularity."],
+        "challenges": ["What if we needed real-time analytics instead of eventual?", "What if we needed 99.999% availability?", "What if we needed to support 10x the traffic?"],
+        "expected_considerations": ["Eventual consistency for analytics is acceptable", "Base62 is simpler but sequential; hash is random but may collide", "Cost of storing full analytics vs aggregated"]
+      }
+    ],
+    "tags": ["url-shortener", "caching", "scaling", "system-design"]
+  },
+  {
+    "title": "Design a Real-Time Chat System",
+    "description": "Design a messaging system like Slack or Discord supporting 1:1 messages, group channels, message history, online presence, file sharing, and push notifications.",
+    "type": "design",
+    "track": "architecture",
+    "difficulty": "hard",
+    "level": 4,
+    "stages": [
+      {
+        "name": "requirements",
+        "prompt": "You're designing a real-time chat system. What requirements would you gather before starting the design?",
+        "hints": ["1:1 vs group — what are the differences architecturally?", "What does 'real-time' mean in terms of latency?", "How long should message history be retained?"],
+        "challenges": ["How many concurrent users do we need to support?", "What's the maximum group size?", "Do we need end-to-end encryption?"],
+        "expected_considerations": ["1:1 and group messaging", "Real-time delivery (<100ms)", "Message persistence and search", "Online/offline presence", "File sharing", "Push notifications for offline users"]
+      },
+      {
+        "name": "high_level_architecture",
+        "prompt": "Design the high-level architecture. How would you handle real-time message delivery?",
+        "hints": ["WebSockets for persistent connections.", "How do you route messages to the right server?", "What about users on multiple devices?"],
+        "challenges": ["How do you handle millions of concurrent WebSocket connections?", "What happens when a WebSocket server goes down?", "How do you handle message ordering?"],
+        "expected_considerations": ["WebSocket gateway servers", "Message routing via pub/sub", "Chat service for business logic", "Presence service", "Notification service for offline users"]
+      },
+      {
+        "name": "database",
+        "prompt": "How would you store messages? Consider the access patterns: recent messages loaded frequently, older messages less so, full-text search needed.",
+        "hints": ["Time-series access pattern for messages.", "Consider partitioning by channel/conversation.", "Search is a separate concern from storage."],
+        "challenges": ["Why not just use PostgreSQL for everything?", "How do you handle a channel with millions of messages?", "How do you implement message search at scale?"],
+        "expected_considerations": ["Messages in Cassandra or partitioned Postgres (time-based)", "Channel metadata in SQL", "Elasticsearch for search", "Files in object storage (S3)"]
+      },
+      {
+        "name": "reliability",
+        "prompt": "How do you ensure message delivery reliability? What guarantees do you provide?",
+        "hints": ["At-least-once vs exactly-once delivery.", "What about message ordering within a channel?", "How do you handle network partitions?"],
+        "challenges": ["What if a message is sent but the ACK is lost?", "How do you handle duplicate messages?", "What happens during a rolling deployment?"],
+        "expected_considerations": ["Message IDs for deduplication", "Per-channel ordering via sequence numbers", "Client-side retry with idempotency", "Graceful WebSocket migration during deploys"]
+      },
+      {
+        "name": "scaling",
+        "prompt": "How would you scale this system to support 10 million concurrent users?",
+        "hints": ["WebSocket servers are stateful — how do you scale them?", "How do you handle hot channels (thousands of members)?", "What about geographic distribution?"],
+        "challenges": ["How many WebSocket connections per server?", "How do you handle a viral channel with 100K members all typing?", "What's your fan-out strategy?"],
+        "expected_considerations": ["Horizontal scaling of WebSocket servers", "Consistent hashing for user-to-server mapping", "Fan-out on write for small groups, fan-out on read for large channels", "Multi-region deployment with regional routing"]
+      },
+      {
+        "name": "tradeoffs",
+        "prompt": "What are the main tradeoffs in your design?",
+        "hints": ["Consistency vs latency for message delivery.", "Storage cost vs search capability.", "Complexity vs features."],
+        "challenges": ["Would you change anything for a system focused on ephemeral messages (like Snapchat)?", "What if we needed end-to-end encryption?", "How would the design change for a system with 1 billion users?"],
+        "expected_considerations": ["Eventual consistency acceptable for presence", "Fan-out strategy depends on group size", "Search adds complexity but is expected", "E2E encryption changes the architecture significantly"]
+      }
+    ],
+    "tags": ["real-time", "websockets", "messaging", "distributed-systems"]
+  },
+  {
+    "title": "Design an E-Commerce Checkout System",
+    "description": "Design the checkout and payment processing system for an e-commerce platform. Handle cart management, inventory, payment processing, order fulfillment, and failure recovery.",
+    "type": "design",
+    "track": "architecture",
+    "difficulty": "hard",
+    "level": 4,
+    "stages": [
+      {
+        "name": "requirements",
+        "prompt": "You're designing the checkout system for an e-commerce platform. What requirements would you clarify?",
+        "hints": ["Think about the checkout flow from cart to order confirmation.", "What about inventory — when do you reserve it?", "Payment failures and retries."],
+        "challenges": ["What consistency guarantees do we need for inventory?", "How do we handle flash sales with limited inventory?", "What payment methods do we need to support?"],
+        "expected_considerations": ["Cart management", "Inventory reservation", "Payment processing", "Order creation", "Failure handling and idempotency", "Fraud detection"]
+      },
+      {
+        "name": "high_level_architecture",
+        "prompt": "Design the high-level architecture for the checkout flow. What services are involved and how do they communicate?",
+        "hints": ["Think about the sequence of operations.", "Which operations need to be synchronous vs asynchronous?", "How do you handle partial failures?"],
+        "challenges": ["What if the payment succeeds but inventory reservation fails?", "How do you implement distributed transactions?", "What's the saga pattern and would you use it here?"],
+        "expected_considerations": ["Cart service", "Inventory service", "Payment service", "Order service", "Notification service", "Saga pattern for distributed transactions"]
+      },
+      {
+        "name": "database",
+        "prompt": "Design the database schema for the checkout system. How do you handle inventory consistency?",
+        "hints": ["Inventory needs strong consistency to prevent overselling.", "Orders need to be immutable once confirmed.", "Consider optimistic vs pessimistic locking."],
+        "challenges": ["How do you prevent two users from buying the last item simultaneously?", "What about inventory across multiple warehouses?", "How do you handle abandoned carts with reserved inventory?"],
+        "expected_considerations": ["Inventory: optimistic locking or SELECT FOR UPDATE", "Order table with status tracking", "Payment records linked to orders", "TTL on inventory reservations"]
+      },
+      {
+        "name": "reliability",
+        "prompt": "How do you ensure the checkout is reliable? Payments must never be duplicated or lost.",
+        "hints": ["Idempotency keys for payment requests.", "What if the user clicks 'Pay' twice?", "How do you reconcile with the payment provider?"],
+        "challenges": ["What happens if your system crashes between charging the card and creating the order?", "How do you handle refunds?", "What about payment provider outages?"],
+        "expected_considerations": ["Idempotency keys", "Two-phase payment (authorize then capture)", "Outbox pattern for reliable events", "Dead letter queue for failed operations", "Reconciliation jobs"]
+      },
+      {
+        "name": "tradeoffs",
+        "prompt": "What are the key tradeoffs? How would your design change for different scales?",
+        "hints": ["Consistency vs availability during flash sales.", "Synchronous vs asynchronous payment processing.", "Monolithic vs microservices checkout."],
+        "challenges": ["How would you handle Black Friday traffic (100x normal)?", "What if we needed to support cryptocurrency payments?", "How do you handle cross-border transactions with different tax rules?"],
+        "expected_considerations": ["Strong consistency for inventory at the cost of throughput", "Async processing for non-critical steps (email, analytics)", "Queue-based load leveling for payment processing", "Feature flags for gradual rollout"]
+      }
+    ],
+    "tags": ["e-commerce", "payments", "distributed-transactions", "inventory"]
+  }
+]
